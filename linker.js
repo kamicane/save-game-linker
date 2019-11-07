@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 'use strict'
 
 const fse = require('fs-extra')
@@ -12,6 +13,13 @@ const YAML_PATH = path.join(SAVES_PATH, 'paths.yml')
 
 const IS_WINDOWS = process.platform === 'win32'
 
+if (!IS_WINDOWS && !process.argv[2]) {
+  console.warn('MUST PROVIDE A PATH ON LINUX')
+  process.exit(0)
+}
+
+const LINK_DIR = IS_WINDOWS ? HOMEDIR : path.resolve(process.argv[2])
+
 async function linkGameSave (srcPath, dstPath) {
   await fse.ensureSymlink(srcPath, dstPath, IS_WINDOWS ? 'junction' : 'dir')
   console.log('linked', dstPath, 'to', srcPath)
@@ -25,7 +33,7 @@ async function relink () {
     const gamePath = saveGameList[gameName]
     if (!/^~/.test(gamePath)) continue
 
-    const dstPath = path.normalize(gamePath.replace('~', HOMEDIR))
+    const dstPath = path.normalize(gamePath.replace('~', LINK_DIR))
     const srcPath = path.normalize(path.join(SAVES_PATH, gameName))
 
     let srcStats
