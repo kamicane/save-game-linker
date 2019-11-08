@@ -6,6 +6,7 @@
   "author": "Valerio Proietti <kamicane@gmail.com>",
   "license": "MIT",
   "dependencies": {
+    "chalk": "^2.4.2",
     "fs-extra": "^8.1.0",
     "yaml": "^1.7.2"
   },
