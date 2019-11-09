@@ -7,6 +7,8 @@ const fse = require('fs-extra')
 const yaml = require('yaml')
 const chalk = require('chalk')
 
+const DRY_RUN = false
+
 const HOMEDIR = os.homedir()
 
 const SAVES_PATH = path.join(HOMEDIR, 'Dropbox', 'Saves')
@@ -30,7 +32,7 @@ if (!IS_WINDOWS && !process.argv[2]) {
 const LINK_DIR = IS_WINDOWS ? HOMEDIR : path.resolve(process.argv[2])
 
 async function linkSaveGame (srcPath, dstPath) {
-  await fse.ensureSymlink(srcPath, dstPath, IS_WINDOWS ? 'junction' : 'dir')
+  if (!DRY_RUN) await fse.ensureSymlink(srcPath, dstPath, IS_WINDOWS ? 'junction' : 'dir')
   console.log('\t', 'linked', chalk.blue(nicePath(dstPath)))
 }
 
@@ -70,7 +72,7 @@ async function processGame (gameName, dstPaths) {
         if (realPath === srcPath) {
           console.log('\t', chalk.green(nicePath(dstPath)), 'is already linked to Dropbox')
         } else if (dstStats.isDirectory()) {
-          await fse.remove(realPath)
+          if (!DRY_RUN) await fse.remove(realPath)
           console.log('\t', chalk.red(nicePath(dstPath)), 'is a directory, removed')
           await linkSaveGame(srcPath, dstPath)
         } else {
@@ -89,7 +91,7 @@ async function processGame (gameName, dstPaths) {
       if (dstStats && dstStats.isDirectory()) {
         // if destination exists move to Dropbox
         console.log('\t', chalk.blue(nicePath(dstPath)), 'moved to Dropbox')
-        await fse.move(dstPath, srcPath)
+        if (!DRY_RUN) await fse.move(dstPath, srcPath)
         // and reprocess game
         await processGame(gameName, dstPaths)
         break
