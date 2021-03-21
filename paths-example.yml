@@ -1,4 +1,4 @@
-Blazing Chrome: $APPDATA_ROAMING/Blazing_Chrome
+Blazing Chrome: $APPDATA_ROAMING/Blazing_Chrome # paths starting with an alias are joined to home-dir
 Blood Fresh Supply: $APPDATA_ROAMING/Nightdive Studios/Blood EX
 Crysis Warhead: $DOCUMENTS/My Games/Crysis_WARHEAD
 Crysis: $DOCUMENTS/My Games/Crysis
@@ -6,7 +6,7 @@ Deadlight Director's Cut: $DOCUMENTS/My Games/UnrealEngine3/LOTDGame
 Dishonored: $DOCUMENTS/My Games/Dishonored
 Dishonored 2: $SAVED_GAMES/Arkane Studios/Dishonored2
 DOOM: $SAVED_GAMES/id Software/DOOM
-Dropsy: /Save
+Dropsy: E:/Games/Dropsy/Save # absolute paths are fine
 Furi: $APPDATA_LOCAL_LOW/TheGameBakers/Furi
 Gato Roboto: $APPDATA_LOCAL/GatoRoboto_patch_1_1
 Gunmetal Arcadia Zero: $DOCUMENTS/My Games/Gunmetal Arcadia Zero

@@ -1,16 +1,22 @@
 {
   "name": "save-game-linker",
   "version": "1.0.0",
-  "description": "Save Game Linker",
-  "main": "index.js",
+  "description": "save game linker for easy syncing",
+  "bin": {
+    "save-game-linker": "./linker.js"
+  },
   "author": "Valerio Proietti <kamicane@gmail.com>",
+  "repository": "github:kamicane/save-game-linker",
+  "homepage": "https://github.com/kamicane/save-game-linker#readme",
+  "bugs": "https://github.com/kamicane/save-game-linker/issues",
   "license": "MIT",
   "dependencies": {
-    "chalk": "^2.4.2",
-    "fs-extra": "^8.1.0",
-    "yaml": "^1.7.2"
+    "chalk": "^4.1.0",
+    "fs-extra": "^9.1.0",
+    "yaml": "^1.10.2",
+    "yargs": "^16.2.0"
   },
   "devDependencies": {
-    "standard": "^14.3.1"
+    "standard": "^16.0.3"
   }
 }
