@@ -62,8 +62,6 @@ console.log('using SAVE_DIR: ', chalk.blue(SAVE_DIR))
 console.log('using CONF_FILE: ', chalk.blue(CONF_FILE))
 console.log('using DRY_RUN: ', chalk.red(DRY_RUN), '\n')
 
-// console.log(argv)
-
 const MAPPINGS = {
   $SAVED_GAMES: ['Saved Games'],
   $APPDATA_ROAMING: ['AppData/Roaming', 'Application Data'],
@@ -113,7 +111,7 @@ async function processGame (gameName, dstPaths) {
   const statMap = {}
 
   for (const dstPath of dstPaths) {
-    let dstStats
+    let dstStats = null
     try {
       dstStats = await fse.stat(dstPath)
     } catch (err) {}
@@ -142,6 +140,7 @@ async function processGame (gameName, dstPaths) {
         console.log('\t', chalk.blue(nicePath(dstPath)), 'exists, moved to', PRETTY_SAVE_DIR, 'extra copies will be destroyed and relinked.')
         if (!DRY_RUN) await fse.move(dstPath, srcPath)
         // and linkSaves
+        statMap[dstPath] = null
         await linkSaves(gameName, srcPath, statMap)
 
         break // !important: break at first directory found.
@@ -162,8 +161,9 @@ async function relink () {
     const dstPaths = new Set()
 
     if (!/^\$/.test(gamePath)) {
-      dstPaths.add(path.resolve(HOME_DIR, gamePath))
-    } else {
+      const homeGamePath = gamePath.replace(/^~\//, '') // replace ~/ just in case
+      dstPaths.add(path.resolve(HOME_DIR, homeGamePath))
+    } else { // mappings are very for windows only, but work for wine installations as well.
       const parts = gamePath.split('/')
       const type = parts.shift()
 

@@ -2,7 +2,7 @@
 
 Moves actual save games to a specified folder, and symlinks destinations.
 
-Useful for syncing save games with Dropbox or Google Drive or whatnot.
+Useful for syncing save games with Dropbox, Google Drive, a git repo and whatnot.
 
 Can also be used for other stuff such as configuration files and the likes.
 
