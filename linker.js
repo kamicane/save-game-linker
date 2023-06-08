@@ -1,18 +1,18 @@
 #!/usr/bin/env node
-'use strict'
 
-const os = require('os')
-const path = require('path')
-const fse = require('fs-extra')
-const yaml = require('yaml')
-const chalk = require('chalk')
+import chalk from 'chalk'
+import os from 'node:os'
+import path from 'node:path'
+import fse from 'fs-extra'
+import yaml from 'yaml'
 
-const yargs = require('yargs/yargs')
+import yargs from 'yargs/yargs'
 
 const IS_WINDOWS = process.platform === 'win32'
 
-const HOME_DIR_DEFAULT = os.homedir()
-const SAVE_DIR_DEFAULT = path.join(HOME_DIR_DEFAULT, 'Dropbox', 'Saves')
+const USER_DIR_DEFAULT = os.homedir()
+const PUBLIC_DIR_DEFAULT = path.join(USER_DIR_DEFAULT, '../Public')
+const SAVE_DIR_DEFAULT = path.join(USER_DIR_DEFAULT, 'Dropbox', 'Saves')
 const CONF_FILE_DEFAULT = path.join(SAVE_DIR_DEFAULT, `paths-${IS_WINDOWS ? 'windows' : 'linux'}.yml`)
 
 const parser = yargs(process.argv.slice(2))
@@ -28,10 +28,17 @@ parser.option('dry-run', {
 })
 
 parser.option('home-dir', {
-  default: HOME_DIR_DEFAULT,
+  default: USER_DIR_DEFAULT,
   type: 'string',
   normalize: true,
-  describe: 'home dir'
+  describe: 'user home dir'
+})
+
+parser.option('public-dir', {
+  default: PUBLIC_DIR_DEFAULT,
+  type: 'string',
+  normalize: true,
+  describe: 'public user home dir'
 })
 
 parser.option('save-dir', {
@@ -55,6 +62,7 @@ const argv = parser.parse()
 const HOME_DIR = path.resolve(argv.homeDir)
 const CONF_FILE = path.resolve(argv.conf)
 const SAVE_DIR = path.resolve(argv.saveDir)
+const PUBLIC_DIR = path.resolve(argv.publicDir)
 const DRY_RUN = argv.dryRun
 
 console.log('using HOME_DIR: ', chalk.green(HOME_DIR))
@@ -63,11 +71,13 @@ console.log('using CONF_FILE: ', chalk.blue(CONF_FILE))
 console.log('using DRY_RUN: ', chalk.red(DRY_RUN), '\n')
 
 const MAPPINGS = {
-  $SAVED_GAMES: ['Saved Games'],
-  $APPDATA_ROAMING: ['AppData/Roaming', 'Application Data'],
-  $APPDATA_LOCAL: ['AppData/Local', 'Local Settings', 'Local Settings/Application Data'],
-  $DOCUMENTS: ['Documents', 'My Documents'],
-  $APPDATA_LOCAL_LOW: ['AppData/LocalLow']
+  $CODEX: [path.join(HOME_DIR, 'AppData/Roaming/Steam/CODEX'), path.join(PUBLIC_DIR, 'Documents/Steam/CODEX')],
+  $SAVED_GAMES: [path.join(HOME_DIR, 'Saved Games')],
+  $APPDATA_ROAMING: [path.join(HOME_DIR, 'AppData/Roaming')/* , path.join(HOME_DIR, 'Application Data') */],
+  $APPDATA_LOCAL: [path.join(HOME_DIR, 'AppData/Local')/* , path.join(HOME_DIR, 'Local Settings') *//*, path.join(HOME_DIR, 'Local Settings/Application Data') */],
+  $DOCUMENTS: [path.join(HOME_DIR, 'Documents')/* , path.join(HOME_DIR, 'My Documents') */],
+  $MY_GAMES: [path.join(HOME_DIR, 'Documents/My Games')/* , path.join(HOME_DIR, 'My Documents/My Games') */],
+  $APPDATA_LOCAL_LOW: [path.join(HOME_DIR, 'AppData/LocalLow')]
 }
 
 function nicePath (p) {
@@ -99,7 +109,6 @@ async function linkSaves (gameName, srcPath, statMap) {
         await linkSave(srcPath, dstPath)
       }
     } else { // doesn't exist
-      console.log('\t', chalk.yellow(nicePath(dstPath)), 'was not present')
       await linkSave(srcPath, dstPath)
     }
   }
@@ -163,14 +172,20 @@ async function relink () {
     if (!/^\$/.test(gamePath)) {
       const homeGamePath = gamePath.replace(/^~\//, '') // replace ~/ just in case
       dstPaths.add(path.resolve(HOME_DIR, homeGamePath))
-    } else { // mappings are very for windows only, but work for wine installations as well.
+    } else { // mappings are for windows games only, but work for wine installations as well.
       const parts = gamePath.split('/')
       const type = parts.shift()
 
       const dstBases = MAPPINGS[type]
       for (const dstBase of dstBases) {
-        const dstBaseFull = path.join(HOME_DIR, dstBase)
-        const dstBaseReal = await fse.realpath(dstBaseFull)
+        const dstBaseFull = path.resolve(dstBase)
+        // Real paths only, Set will not accept duplicates
+        let dstBaseReal
+        try {
+          dstBaseReal = await fse.realpath(dstBaseFull)
+        } catch (err) {
+          dstBaseReal = dstBaseFull
+        }
         dstPaths.add(path.join(dstBaseReal, ...parts))
       }
     }
