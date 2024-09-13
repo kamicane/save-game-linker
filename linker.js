@@ -3,7 +3,7 @@
 import chalk from 'chalk'
 import os from 'node:os'
 import path from 'node:path'
-import fse from 'fs-extra'
+import fsp from 'node:fs/promises'
 import yaml from 'yaml'
 
 import yargs from 'yargs/yargs'
@@ -13,7 +13,7 @@ const IS_WINDOWS = process.platform === 'win32'
 const USER_DIR_DEFAULT = os.homedir()
 const PUBLIC_DIR_DEFAULT = path.join(USER_DIR_DEFAULT, '../Public')
 const SAVE_DIR_DEFAULT = path.join(USER_DIR_DEFAULT, 'Dropbox', 'Saves')
-const CONF_FILE_DEFAULT = path.join(SAVE_DIR_DEFAULT, `paths-${IS_WINDOWS ? 'windows' : 'linux'}.yml`)
+const PATHS_FILE_DEFAULT = path.join(SAVE_DIR_DEFAULT, `paths-${IS_WINDOWS ? 'windows' : 'linux'}.yml`)
 
 const parser = yargs(process.argv.slice(2))
 
@@ -48,8 +48,8 @@ parser.option('save-dir', {
   describe: 'where to store save directories'
 })
 
-parser.option('conf', {
-  default: CONF_FILE_DEFAULT,
+parser.option('paths-file', {
+  default: PATHS_FILE_DEFAULT,
   type: 'string',
   normalize: true,
   describe: 'configuration file to use'
@@ -60,14 +60,14 @@ parser.epilogue('https://github.com/kamicane/save-game-linker')
 const argv = parser.parse()
 
 const HOME_DIR = path.resolve(argv.homeDir)
-const CONF_FILE = path.resolve(argv.conf)
+const PATHS_FILE = path.resolve(argv.pathsFile)
 const SAVE_DIR = path.resolve(argv.saveDir)
 const PUBLIC_DIR = path.resolve(argv.publicDir)
 const DRY_RUN = argv.dryRun
 
 console.log('using HOME_DIR: ', chalk.green(HOME_DIR))
 console.log('using SAVE_DIR: ', chalk.blue(SAVE_DIR))
-console.log('using CONF_FILE: ', chalk.blue(CONF_FILE))
+console.log('using CONF_FILE: ', chalk.blue(PATHS_FILE))
 console.log('using DRY_RUN: ', chalk.red(DRY_RUN), '\n')
 
 const MAPPINGS = {
@@ -87,7 +87,9 @@ function nicePath (p) {
 const PRETTY_SAVE_DIR = chalk.blue(nicePath(SAVE_DIR))
 
 async function linkSave (srcPath, dstPath) {
-  if (!DRY_RUN) await fse.ensureSymlink(srcPath, dstPath, IS_WINDOWS ? 'junction' : 'dir')
+  if (!DRY_RUN) {
+    await fsp.symlink(srcPath, dstPath, IS_WINDOWS ? 'junction' : 'dir')
+  }
   console.log('\t', 'linked', chalk.yellow(nicePath(dstPath)), 'to', chalk.blue(nicePath(srcPath)))
 }
 
@@ -95,17 +97,25 @@ async function linkSaves (gameName, srcPath, statMap) {
   for (const dstPath in statMap) {
     const dstStats = statMap[dstPath]
     if (dstStats) { // exists already
-      const realPath = await fse.realpath(dstPath)
+      let realPath
+      try {
+        realPath = await fsp.realpath(dstPath)
+      } catch (err) {
+        if (!DRY_RUN) await fsp.rm(dstPath)
+        console.log('\t', chalk.red(nicePath(dstPath)), 'is an orphan, destroyed')
+      }
 
       if (realPath === srcPath) { // exists and is a symlink already pointing to savePath
         console.log('\t', chalk.green(nicePath(dstPath)), 'is already linked to', chalk.blue(nicePath(srcPath)))
       } else if (dstStats.isDirectory()) {
-        if (!DRY_RUN) await fse.remove(realPath)
+        if (!DRY_RUN) await fsp.rm(realPath, { recursive: true, force: true })
         console.log('\t', chalk.red(nicePath(dstPath)), 'is a directory, destroyed')
         await linkSave(srcPath, dstPath)
       } else {
-        if (!DRY_RUN) await fse.remove(realPath)
-        console.log('\t', chalk.red(nicePath(dstPath)), 'is of an unknown type, destroyed')
+        if (realPath != null) {
+          if (!DRY_RUN) await fsp.rm(realPath, { recursive: true, force: true })
+          console.log('\t', chalk.red(nicePath(dstPath)), 'is of an unknown type, destroyed')
+        }
         await linkSave(srcPath, dstPath)
       }
     } else { // doesn't exist
@@ -122,7 +132,7 @@ async function processGame (gameName, dstPaths) {
   for (const dstPath of dstPaths) {
     let dstStats = null
     try {
-      dstStats = await fse.stat(dstPath)
+      dstStats = await fsp.lstat(dstPath)
     } catch (err) {}
 
     statMap[dstPath] = dstStats
@@ -130,7 +140,7 @@ async function processGame (gameName, dstPaths) {
 
   let srcStats
   try {
-    srcStats = await fse.stat(srcPath)
+    srcStats = await fsp.lstat(srcPath)
   } catch (err) {}
 
   if (srcStats && srcStats.isDirectory()) {
@@ -146,8 +156,8 @@ async function processGame (gameName, dstPaths) {
       const dstStats = statMap[dstPath]
       if (dstStats && dstStats.isDirectory()) {
         // if destination exists move to save dir
-        console.log('\t', chalk.blue(nicePath(dstPath)), 'exists, moved to', PRETTY_SAVE_DIR, 'extra copies will be destroyed and relinked.')
-        if (!DRY_RUN) await fse.move(dstPath, srcPath)
+        console.log('\t', chalk.blue(nicePath(dstPath)), 'exists, moving to', PRETTY_SAVE_DIR, 'extra copies will be destroyed and relinked.')
+        if (!DRY_RUN) await fsp.rename(srcPath, dstPath)
         // and linkSaves
         statMap[dstPath] = null
         await linkSaves(gameName, srcPath, statMap)
@@ -162,7 +172,7 @@ async function processGame (gameName, dstPaths) {
 }
 
 async function relink () {
-  const saveGames = await fse.readFile(CONF_FILE, 'utf8')
+  const saveGames = await fsp.readFile(PATHS_FILE, 'utf8')
   const saveGameList = await yaml.parse(saveGames)
 
   for (const gameName in saveGameList) {
@@ -182,7 +192,7 @@ async function relink () {
         // Real paths only, Set will not accept duplicates
         let dstBaseReal
         try {
-          dstBaseReal = await fse.realpath(dstBaseFull)
+          dstBaseReal = await fsp.realpath(dstBaseFull)
         } catch (err) {
           dstBaseReal = dstBaseFull
         }
