@@ -1,207 +1,161 @@
 #!/usr/bin/env node
 
-import chalk from 'chalk'
 import os from 'node:os'
 import path from 'node:path'
 import fsp from 'node:fs/promises'
-import yaml from 'yaml'
 
+import chalk from 'chalk'
+import yaml from 'yaml'
 import yargs from 'yargs/yargs'
 
-const IS_WINDOWS = process.platform === 'win32'
-
-const USER_DIR_DEFAULT = os.homedir()
-const PUBLIC_DIR_DEFAULT = path.join(USER_DIR_DEFAULT, '../Public')
-const SAVE_DIR_DEFAULT = path.join(USER_DIR_DEFAULT, 'Dropbox', 'Saves')
-const PATHS_FILE_DEFAULT = path.join(SAVE_DIR_DEFAULT, `paths-${IS_WINDOWS ? 'windows' : 'linux'}.yml`)
-
-const parser = yargs(process.argv.slice(2))
-
-parser
-  .alias('h', 'help')
-  .alias('v', 'version')
-
-parser.option('dry-run', {
-  default: false,
-  type: 'boolean',
-  describe: 'do not make any file system modifications'
-})
-
-parser.option('home-dir', {
-  default: USER_DIR_DEFAULT,
-  type: 'string',
-  normalize: true,
-  describe: 'user home dir'
-})
-
-parser.option('public-dir', {
-  default: PUBLIC_DIR_DEFAULT,
-  type: 'string',
-  normalize: true,
-  describe: 'public user home dir'
-})
-
-parser.option('save-dir', {
-  default: SAVE_DIR_DEFAULT,
-  type: 'string',
-  normalize: true,
-  describe: 'where to store save directories'
-})
-
-parser.option('paths-file', {
-  default: PATHS_FILE_DEFAULT,
-  type: 'string',
-  normalize: true,
-  describe: 'configuration file to use'
-})
-
-parser.epilogue('https://github.com/kamicane/save-game-linker')
-
-const argv = parser.parse()
-
-const HOME_DIR = path.resolve(argv.homeDir)
-const PATHS_FILE = path.resolve(argv.pathsFile)
-const SAVE_DIR = path.resolve(argv.saveDir)
-const PUBLIC_DIR = path.resolve(argv.publicDir)
-const DRY_RUN = argv.dryRun
-
-console.log('using HOME_DIR: ', chalk.green(HOME_DIR))
-console.log('using SAVE_DIR: ', chalk.blue(SAVE_DIR))
-console.log('using CONF_FILE: ', chalk.blue(PATHS_FILE))
-console.log('using DRY_RUN: ', chalk.red(DRY_RUN), '\n')
-
-const MAPPINGS = {
-  $CODEX: [path.join(HOME_DIR, 'AppData/Roaming/Steam/CODEX'), path.join(PUBLIC_DIR, 'Documents/Steam/CODEX')],
-  $SAVED_GAMES: [path.join(HOME_DIR, 'Saved Games')],
-  $APPDATA_ROAMING: [path.join(HOME_DIR, 'AppData/Roaming')/* , path.join(HOME_DIR, 'Application Data') */],
-  $APPDATA_LOCAL: [path.join(HOME_DIR, 'AppData/Local')/* , path.join(HOME_DIR, 'Local Settings') *//*, path.join(HOME_DIR, 'Local Settings/Application Data') */],
-  $DOCUMENTS: [path.join(HOME_DIR, 'Documents')/* , path.join(HOME_DIR, 'My Documents') */],
-  $MY_GAMES: [path.join(HOME_DIR, 'Documents/My Games')/* , path.join(HOME_DIR, 'My Documents/My Games') */],
-  $APPDATA_LOCAL_LOW: [path.join(HOME_DIR, 'AppData/LocalLow')]
-}
+let HOME_DIR
+let DRY_RUN
+let SAVES_DIR
 
 function nicePath (p) {
   return path.relative(HOME_DIR, p)
 }
 
-const PRETTY_SAVE_DIR = chalk.blue(nicePath(SAVE_DIR))
-
 async function linkSave (srcPath, dstPath) {
   if (!DRY_RUN) {
-    await fsp.symlink(srcPath, dstPath, IS_WINDOWS ? 'junction' : 'dir')
+    await fsp.symlink(srcPath, dstPath, process.platform === 'win32' ? 'junction' : 'dir')
   }
-  console.log('\t', 'linked', chalk.yellow(nicePath(dstPath)), 'to', chalk.blue(nicePath(srcPath)))
+  console.log(`  linked ${chalk.yellow(nicePath(dstPath))} to ${chalk.blue(nicePath(srcPath))}`)
 }
 
-async function linkSaves (gameName, srcPath, statMap) {
-  for (const dstPath in statMap) {
-    const dstStats = statMap[dstPath]
-    if (dstStats) { // exists already
-      let realPath
-      try {
-        realPath = await fsp.realpath(dstPath)
-      } catch (err) {
-        if (!DRY_RUN) await fsp.rm(dstPath)
-        console.log('\t', chalk.red(nicePath(dstPath)), 'is an orphan, destroyed')
-      }
+async function processGame (gameName, saveDir) {
+  const srcDir = path.join(SAVES_DIR, gameName)
 
-      if (realPath === srcPath) { // exists and is a symlink already pointing to savePath
-        console.log('\t', chalk.green(nicePath(dstPath)), 'is already linked to', chalk.blue(nicePath(srcPath)))
-      } else if (dstStats.isDirectory()) {
-        if (!DRY_RUN) await fsp.rm(realPath, { recursive: true, force: true })
-        console.log('\t', chalk.red(nicePath(dstPath)), 'is a directory, destroyed')
-        await linkSave(srcPath, dstPath)
-      } else {
-        if (realPath != null) {
-          if (!DRY_RUN) await fsp.rm(realPath, { recursive: true, force: true })
-          console.log('\t', chalk.red(nicePath(dstPath)), 'is of an unknown type, destroyed')
-        }
-        await linkSave(srcPath, dstPath)
-      }
-    } else { // doesn't exist
-      await linkSave(srcPath, dstPath)
-    }
-  }
-}
-
-async function processGame (gameName, dstPaths) {
-  const srcPath = path.join(SAVE_DIR, gameName)
-
-  const statMap = {}
-
-  for (const dstPath of dstPaths) {
-    let dstStats = null
-    try {
-      dstStats = await fsp.lstat(dstPath)
-    } catch (err) {}
-
-    statMap[dstPath] = dstStats
-  }
-
-  let srcStats
+  let srcStat
   try {
-    srcStats = await fsp.lstat(srcPath)
+    srcStat = await fsp.stat(srcDir)
   } catch (err) {}
 
-  if (srcStats && srcStats.isDirectory()) {
-    // game save is found in your save dir
-    // destroy everything and relink everything
-    console.log(chalk.magenta(gameName), 'is already in', PRETTY_SAVE_DIR, 'everything else will be destroyed')
+  const srcReal = srcStat ? await fsp.realpath(srcDir) : null
 
-    await linkSaves(gameName, srcPath, statMap)
-  } else if (!srcStats) {
-    console.log(chalk.red(gameName), 'is not in', PRETTY_SAVE_DIR, 'trying to find a source...')
-    // save is not in your save dir (yet)
-    for (const dstPath in statMap) {
-      const dstStats = statMap[dstPath]
-      if (dstStats && dstStats.isDirectory()) {
-        // if destination exists move to save dir
-        console.log('\t', chalk.blue(nicePath(dstPath)), 'exists, moving to', PRETTY_SAVE_DIR, 'extra copies will be destroyed and relinked.')
-        if (!DRY_RUN) await fsp.rename(srcPath, dstPath)
-        // and linkSaves
-        statMap[dstPath] = null
-        await linkSaves(gameName, srcPath, statMap)
+  let dstStat
+  try {
+    dstStat = await fsp.stat(saveDir)
+  } catch (err) {}
 
-        break // !important: break at first directory found.
-      }
+  const dstReal = dstStat ? await fsp.realpath(saveDir) : null
+
+  // scenarios
+  // 1: source directory exists, destination does not exist = link
+  // 2: source directory exists, destination exists, not already linked = delete destination and link
+  // 2: source directory exists, destination exists, already linked = log
+  // 2: source directory does not exist, destination exists and is directory = move destination to source and link
+  // 2: source directory does not exist, destination exists and is not directory = warn
+  // 2: source directory does not exist, destination does not exist = do nothing, no warn
+
+  if (srcStat && srcStat.isDirectory()) {
+    console.log(`${chalk.green(gameName)}`)
+
+    if (dstReal === srcReal) {
+      console.log(`  ${chalk.yellow(nicePath(saveDir))} is already linked to ${chalk.blue(nicePath(srcDir))}`)
+    } else {
+      try {
+        const lstat = await fsp.lstat(saveDir)
+        if (lstat && !DRY_RUN) await fsp.rm(saveDir, { recursive: true, force: true })
+        if (lstat) console.log(`  ${chalk.red(nicePath(saveDir))} was deleted`)
+      } catch (err) {}
+      await linkSave(srcDir, saveDir)
     }
+  } else if (dstStat && dstStat.isDirectory()) {
+    console.log(`${chalk.magenta(gameName)}`)
+
+    try {
+      const lstat = await fsp.lstat(srcDir)
+      if (lstat && !DRY_RUN) await fsp.rm(srcDir, { recursive: true, force: true })
+      if (lstat) console.log(`  ${chalk.red(nicePath(srcDir))} was deleted`)
+    } catch (err) {}
+    if (!DRY_RUN) await fsp.rename(saveDir, srcDir)
+    console.log(`  moved ${chalk.blue(nicePath(saveDir))} to ${chalk.blue(nicePath(SAVES_DIR))}`)
+    await linkSave(srcDir, saveDir)
   } else {
-    // should never happen
-    console.log('\t', chalk.red(nicePath(srcPath)), 'is of an unknown type, skipping...')
+    console.log(`${chalk.gray(gameName)}`)
   }
 }
 
-async function relink () {
-  const saveGames = await fsp.readFile(PATHS_FILE, 'utf8')
-  const saveGameList = await yaml.parse(saveGames)
+async function init () {
+  const confFile = path.join(os.homedir(), '.save-game-linker')
+  let configuration
 
-  for (const gameName in saveGameList) {
-    const gamePath = saveGameList[gameName]
-    const dstPaths = new Set()
+  try {
+    const configurationText = await fsp.readFile(confFile, 'utf-8')
+    configuration = yaml.parse(configurationText)
+  } catch (err) {}
 
-    if (!/^\$/.test(gamePath)) {
-      const homeGamePath = gamePath.replace(/^~\//, '') // replace ~/ just in case
-      dstPaths.add(path.resolve(HOME_DIR, homeGamePath))
-    } else { // mappings are for windows games only, but work for wine installations as well.
-      const parts = gamePath.split('/')
-      const type = parts.shift()
+  let homeDirDefault = os.homedir()
+  let savesDirDefault = path.join(homeDirDefault, 'Dropbox', 'Saves')
+  let pathsFileDefault
 
-      const dstBases = MAPPINGS[type]
-      for (const dstBase of dstBases) {
-        const dstBaseFull = path.resolve(dstBase)
-        // Real paths only, Set will not accept duplicates
-        let dstBaseReal
-        try {
-          dstBaseReal = await fsp.realpath(dstBaseFull)
-        } catch (err) {
-          dstBaseReal = dstBaseFull
-        }
-        dstPaths.add(path.join(dstBaseReal, ...parts))
-      }
-    }
+  if (configuration != null) {
+    if (configuration.saves_dir) savesDirDefault = configuration.saves_dir
+    if (configuration.paths_file) pathsFileDefault = configuration.paths_file
+    if (configuration.home_dir) homeDirDefault = configuration.home_dir
+  }
 
-    await processGame(gameName, dstPaths)
+  if (pathsFileDefault == null) {
+    pathsFileDefault = path.join(savesDirDefault, 'paths.yml')
+  }
+
+  const parser = yargs(process.argv.slice(2))
+
+  parser
+    .alias('h', 'help')
+    .alias('v', 'version')
+
+  parser.option('dry-run', {
+    default: false,
+    type: 'boolean',
+    describe: 'do not make any file system modifications'
+  })
+
+  parser.option('home-dir', {
+    default: homeDirDefault,
+    type: 'string',
+    normalize: true,
+    describe: 'user home dir'
+  })
+
+  parser.option('saves-dir', {
+    default: savesDirDefault,
+    type: 'string',
+    normalize: true,
+    describe: 'where to store save directories'
+  })
+
+  parser.option('paths-file', {
+    default: pathsFileDefault,
+    type: 'string',
+    normalize: true,
+    describe: 'paths file to use'
+  })
+
+  parser.epilogue('https://github.com/kamicane/save-game-linker')
+
+  const argv = parser.parse()
+
+  const pathsFile = path.resolve(argv.pathsFile)
+
+  HOME_DIR = path.resolve(argv.homeDir)
+  SAVES_DIR = path.resolve(argv.savesDir)
+  DRY_RUN = argv.dryRun
+
+  console.log('Home Directory : ', chalk.blue(HOME_DIR))
+  console.log('Saves Directory: ', chalk.blue(SAVES_DIR))
+  console.log('Paths file     : ', chalk.blue(pathsFile))
+  console.log('Dry run        : ', chalk.blue(DRY_RUN), '\n')
+
+  const paths = await fsp.readFile(pathsFile, 'utf8')
+  const gameList = await yaml.parse(paths)
+
+  for (const gameName in gameList) {
+    const saveDir = gameList[gameName].replace(/^~\//, `${HOME_DIR}/`)
+
+    await processGame(gameName, path.resolve(saveDir))
   }
 }
 
-relink()
+init()
