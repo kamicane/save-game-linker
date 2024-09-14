@@ -145,8 +145,8 @@ async function init () {
 
   console.log('Home Directory : ', chalk.blue(HOME_DIR))
   console.log('Saves Directory: ', chalk.blue(SAVES_DIR))
-  console.log('Paths file     : ', chalk.blue(pathsFile))
-  console.log('Dry run        : ', chalk.blue(DRY_RUN), '\n')
+  console.log('Paths File     : ', chalk.blue(pathsFile))
+  console.log('Dry Run        : ', chalk.blue(DRY_RUN), '\n')
 
   const paths = await fsp.readFile(pathsFile, 'utf8')
   const gameList = await yaml.parse(paths)
