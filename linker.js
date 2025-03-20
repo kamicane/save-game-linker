@@ -2,7 +2,7 @@
 
 import os from 'node:os'
 import path from 'node:path'
-import fsp from 'node:fs/promises'
+import fsp from 'fs-extra'
 
 import chalk from 'chalk'
 import yaml from 'yaml'
@@ -18,6 +18,7 @@ function nicePath (p) {
 
 async function linkSave (srcPath, dstPath) {
   if (!DRY_RUN) {
+    await fsp.mkdirp(path.dirname(dstPath))
     await fsp.symlink(srcPath, dstPath, process.platform === 'win32' ? 'junction' : 'dir')
   }
   console.log(`  linked ${chalk.yellow(nicePath(dstPath))} to ${chalk.blue(nicePath(srcPath))}`)
