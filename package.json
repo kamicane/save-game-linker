@@ -1,7 +1,7 @@
 {
-  "name": "save-game-linker",
-  "version": "1.0.0",
-  "description": "save game linker for easy syncing",
+  "name": "game-linker",
+  "version": "2.0.0",
+  "description": "game linker for easy syncing of save games, and automatic shortcut manager",
   "type": "module",
   "bin": {
     "save-game-linker": "./linker.js"
@@ -12,8 +12,13 @@
   "bugs": "https://github.com/kamicane/save-game-linker/issues",
   "license": "MIT",
   "dependencies": {
+    "buffer-crc32": "^1.0.0",
     "chalk": "^5.4.1",
+    "create-desktop-shortcuts": "^1.11.0",
     "fs-extra": "^11.3.0",
+    "glob": "^11.0.1",
+    "steam-binary-vdf": "^0.1.0",
+    "steam-categories": "^1.1.4",
     "yaml": "^2.7.0",
     "yargs": "^17.7.2"
   },
