@@ -15,9 +15,6 @@ import crc32 from 'buffer-crc32'
 
 let HOME_DIR
 let DRY_RUN
-let SAVES_DIR
-let GAMES_DIR
-let SHORTCUTS_DIR
 
 function genSteamAppId (exePath) {
   const crc = crc32.unsigned(exePath + '\0') // Append null byte
@@ -47,8 +44,8 @@ async function linkSave (srcPath, dstPath) {
   console.log(`  linked ${nicePath(dstPath, 'yellow')} to ${nicePath(srcPath, 'blue')}`)
 }
 
-async function processGameSave (gameName, saveDir) {
-  const srcDir = path.join(SAVES_DIR, gameName)
+async function processGameSave (gameName, saveDir, savesDir) {
+  const srcDir = path.join(savesDir, gameName)
 
   let srcStat
   try {
@@ -90,22 +87,22 @@ async function processGameSave (gameName, saveDir) {
       if (lstat) console.log(`  ${nicePath(srcDir, 'red')} was deleted`)
     } catch (err) { }
     if (!DRY_RUN) await fse.rename(saveDir, srcDir)
-    console.log(`  moved ${nicePath(saveDir, 'blue')} to ${nicePath(SAVES_DIR, 'blue')}`)
+    console.log(`  moved ${nicePath(saveDir, 'blue')} to ${nicePath(savesDir, 'blue')}`)
     await linkSave(srcDir, saveDir)
   }
 }
 
-async function processGameShortcut (gameName, gameExe, gameArgs, savesDir) {
-  const exeFullPath = path.join(GAMES_DIR, gameName, gameExe)
+async function processGameShortcut (gameName, gameExe, gameArgs, gamesDir, shortcutsDir) {
+  const exeFullPath = path.join(gamesDir, gameName, gameExe)
   const exeExists = await fse.exists(exeFullPath)
 
   if (exeExists) {
     const shortcut = {
       filePath: exeFullPath,
-      outputPath: SHORTCUTS_DIR,
-      workingDirectory: path.join(GAMES_DIR, gameName),
+      outputPath: shortcutsDir,
+      workingDirectory: path.join(gamesDir, gameName),
       name: gameName,
-      comment: savesDir || '',
+      comment: 'sgl',
       arguments: gameArgs || ''
     }
 
@@ -118,15 +115,15 @@ async function processGameShortcut (gameName, gameExe, gameArgs, savesDir) {
       })
     }
 
-    if (!created) console.log(`  The shortcut ${nicePath(path.join(SHORTCUTS_DIR, gameName), 'red')} was not created`)
+    if (!created) console.log(`  The shortcut ${nicePath(path.join(shortcutsDir, gameName), 'red')} was not created`)
     else console.log(`  The shortcut ${nicePath(shortcut.outputPath, 'green')} was created`)
   } else {
-    console.log(`  The shortcut ${nicePath(path.join(SHORTCUTS_DIR, gameName), 'red')} was not created (${chalk.red(exeFullPath)} not found)`)
+    console.log(`  The shortcut ${nicePath(path.join(shortcutsDir, gameName), 'red')} was not created (${chalk.red(exeFullPath)} not found)`)
   }
 }
 
-async function processSteamShortcut (gameName, gameExe, gameArgs) {
-  const exeFullPath = path.join(GAMES_DIR, gameName, gameExe)
+async function processSteamShortcut (gameName, gameExe, gameArgs, gamesDir) {
+  const exeFullPath = path.join(gamesDir, gameName, gameExe)
   const exeExists = await fse.exists(exeFullPath)
 
   if (exeExists) {
@@ -134,7 +131,7 @@ async function processSteamShortcut (gameName, gameExe, gameArgs) {
       appid: genSteamAppId(path.join(gameName, gameExe)),
       appname: gameName,
       Exe: `"${exeFullPath}"`,
-      StartDir: `"${path.join(GAMES_DIR, gameName)}"`,
+      StartDir: `"${path.join(gamesDir, gameName)}"`,
       LaunchOptions: gameArgs || '',
       tags: { 0: 'sgl' }
     }
@@ -147,6 +144,64 @@ async function processSteamShortcut (gameName, gameExe, gameArgs) {
 
     return null
   }
+}
+
+async function writeSteamShortcuts (steamUserId, steamShortcuts, steamShortcutsFile, steamLevelDB, steamCollection) {
+  if (DRY_RUN) return // todo
+
+  const oldShortcutsVdf = await decodeSteamShortcut(steamShortcutsFile)
+
+  const oldShortcuts = {}
+  const allShortcuts = []
+
+  for (const steamShortcut of Object.values(oldShortcutsVdf.shortcuts)) {
+    const isSGLGame = Object.values(steamShortcut.tags).includes('sgl')
+    if (!isSGLGame) allShortcuts.push(steamShortcut)
+    else oldShortcuts[steamShortcut.appid] = steamShortcut
+  }
+
+  for (const steamShortcut of steamShortcuts) {
+    const oldShortcut = oldShortcuts[steamShortcut.appid]
+    if (oldShortcut) {
+      oldShortcut.Exe = steamShortcut.Exe
+      oldShortcut.StartDir = steamShortcut.StartDir
+      oldShortcut.LaunchOptions = steamShortcut.LaunchOptions
+      allShortcuts.push(oldShortcut)
+    } else {
+      allShortcuts.push(steamShortcut)
+    }
+  }
+
+  const cats = new SteamCat(steamLevelDB, steamUserId)
+
+  try {
+    await cats.read()
+  } catch (error) {
+    console.log(chalk.red('Error reading steam categories, close Steam before proceeding'))
+    return
+  }
+
+  let sglCollection = cats.get('save-game-linker')
+
+  if (!sglCollection) {
+    sglCollection = cats.add('save-game-linker', {
+      name: steamCollection
+    })
+  }
+
+  sglCollection.value.added = []
+
+  const newShortcutsObj = { shortcuts: {} }
+
+  let steamObjIdx = 0
+  for (const steamShortcut of allShortcuts) {
+    newShortcutsObj.shortcuts[steamObjIdx++] = steamShortcut
+    sglCollection.value.added.push(steamShortcut.appid)
+  }
+
+  await encodeSteamShortcut(steamShortcutsFile, newShortcutsObj)
+  await cats.save()
+  await cats.close()
 }
 
 async function init () {
@@ -182,120 +237,118 @@ async function init () {
 
   const parser = yargs(process.argv.slice(2))
 
-  parser
-    .alias('h', 'help')
-    .alias('v', 'version')
+  parser.wrap(parser.terminalWidth())
 
-  parser.option('dry-run', {
-    default: false,
-    type: 'boolean',
-    describe: 'do not make any file system modifications'
-  })
+  parser.scriptName('game-linker')
 
-  parser.option('game-shortcuts', {
-    default: true,
-    type: 'boolean',
-    describe: 'generate game shortcuts in the specified folder'
-  })
+  parser.demandCommand(1, 'You need to specify at least one command\n')
 
-  parser.option('link-saves', {
-    default: true,
-    type: 'boolean',
-    describe: 'link savegames'
-  })
-
-  parser.option('steam-shortcuts', {
-    default: true,
-    type: 'boolean',
-    describe: 'generates steam shortcuts'
-  })
-
-  parser.option('steam-collection', {
-    default: 'Non-Steam Games',
-    type: 'string',
-    describe: 'the collection to add steam shortcuts to'
-  })
+  parser.command('link-saves', chalk.green('Link savegames'))
+  parser.command('steam-shortcuts', chalk.green('Generate steam shortcuts'))
+  parser.command('game-shortcuts', chalk.green('Generate game shortcuts'))
 
   parser.option('home-dir', {
     default: homeDirDefault,
     type: 'string',
     normalize: true,
-    describe: 'user home dir'
-  })
-
-  parser.option('saves-dir', {
-    default: savesDirDefault,
-    type: 'string',
-    normalize: true,
-    describe: 'where to store save directories'
-  })
-
-  parser.option('games-dir', {
-    default: gamesDirDefault,
-    type: 'string',
-    normalize: true,
-    describe: 'where the games are located'
-  })
-
-  parser.option('shortcuts-dir', {
-    default: shortcutsDirDefault,
-    type: 'string',
-    normalize: true,
-    describe: 'where to store game links'
+    describe: `User home directory ${chalk.grey('(all commands)')}`
   })
 
   parser.option('paths-file', {
     default: pathsFileDefault,
     type: 'string',
     normalize: true,
-    describe: 'paths file to use'
+    describe: `Paths YAML file to use ${chalk.grey('(all commands)')}`
+  })
+
+  parser.option('dry-run', {
+    default: false,
+    type: 'boolean',
+    describe: `Do not make any file system modifications ${chalk.grey('(all commands)')}`
+  })
+
+  parser.option('saves-dir', {
+    default: savesDirDefault,
+    type: 'string',
+    normalize: true,
+    describe: `Directory where to store saves ${chalk.grey('(link-saves)')}`
+  })
+
+  parser.option('shortcuts-dir', {
+    default: shortcutsDirDefault,
+    type: 'string',
+    normalize: true,
+    describe: `Directory where to store game links ${chalk.grey('(game-shortcuts)')}`
+  })
+
+  parser.option('games-dir', {
+    default: gamesDirDefault,
+    type: 'string',
+    normalize: true,
+    describe: `Directory where games are located ${chalk.grey('(game-shortcuts, steam-shortcuts)')}`
+  })
+
+  parser.option('steam-collection', {
+    default: 'Non-Steam Games',
+    type: 'string',
+    describe: `The collection to add steam shortcuts to ${chalk.grey('(steam-shortcuts)')}`
   })
 
   parser.option('steam-dir', {
     default: steamDirDefault,
     type: 'string',
     normalize: true,
-    describe: 'steam directory'
+    describe: `Steam installation directory ${chalk.grey('(steam-shortcuts)')}`
   })
 
   parser.option('steam-user-id', {
     default: steamUserIdDefault,
     type: 'number',
     normalize: true,
-    describe: 'steam user id'
+    describe: `Steam user id ${chalk.grey('(steam-shortcuts)')}`
   })
 
-  parser.epilogue('https://github.com/kamicane/save-game-linker')
+  parser
+    .alias('h', 'help')
+    .alias('v', 'version')
+
+  parser.epilogue('https://github.com/kamicane/game-linker')
 
   const argv = parser.parse()
+  const commands = argv._
 
   const pathsFile = path.resolve(argv.pathsFile)
 
   HOME_DIR = path.resolve(argv.homeDir)
-  SAVES_DIR = path.resolve(argv.savesDir)
-  GAMES_DIR = path.resolve(argv.gamesDir)
-  SHORTCUTS_DIR = path.resolve(argv.shortcutsDir)
 
-  const steamShortcutsFile = path.join(argv.steamDir, 'userdata', `${argv.steamUserId}/config/shortcuts.vdf`)
-  const steamLevelDB = path.join(HOME_DIR, 'AppData/Local/Steam/htmlcache/Local Storage/leveldb')
+  let steamShortcutsFile, steamLevelDB
+
+  if (commands.includes('steam-shortcuts')) {
+    steamShortcutsFile = path.join(argv.steamDir, 'userdata', `${argv.steamUserId}/config/shortcuts.vdf`)
+    steamLevelDB = path.join(HOME_DIR, 'AppData/Local/Steam/htmlcache/Local Storage/leveldb')
+  }
+
   DRY_RUN = argv.dryRun
 
-  console.log('Paths: \n')
+  if (DRY_RUN) {
+    console.log(chalk.green('Dry Run Mode\n'))
+  }
 
-  console.log('  Home Directory      : ', chalk.blue(HOME_DIR))
-  console.log('  Saves Directory     : ', chalk.blue(SAVES_DIR))
-  console.log('  Shortcuts Directory : ', chalk.blue(SHORTCUTS_DIR))
-  console.log('  Games Directory     : ', chalk.blue(GAMES_DIR))
-  console.log('  Games File          : ', chalk.blue(pathsFile))
-  console.log('  Steam Shortcuts     : ', chalk.blue(steamShortcutsFile))
-  console.log('  Steam LevelDB       : ', chalk.blue(steamLevelDB))
-
-  console.log('\nOptions: \n')
-
-  console.log('  Link Saves      : ', chalk.blue(argv.linkSaves))
-  console.log('  Game Links      : ', chalk.blue(argv.gameShortcuts))
-  console.log('  Steam Shortcuts : ', chalk.blue(argv.steamShortcuts))
-  console.log('  Dry Run         : ', chalk.blue(DRY_RUN))
+  console.log('Home Directory      : ', chalk.blue(HOME_DIR))
+  console.log('Paths File          : ', chalk.blue(pathsFile))
+  if (commands.includes('link-saves')) {
+    console.log('Saves Directory     : ', chalk.blue(argv.savesDir))
+  }
+  if (commands.includes('game-shortcuts')) {
+    console.log('Shortcuts Directory : ', chalk.blue(argv.shortcutsDir))
+  }
+  if (commands.includes('game-shortcuts') || commands.includes('steam-shortcuts')) {
+    console.log('Games Directory     : ', chalk.blue(argv.gamesDir))
+  }
+  if (commands.includes('steam-shortcuts')) {
+    console.log('Steam Shortcuts     : ', chalk.blue(steamShortcutsFile))
+    console.log('Steam LevelDB       : ', chalk.blue(steamLevelDB))
+  }
 
   const paths = await fse.readFile(pathsFile, 'utf8')
   const gameList = await yaml.parse(paths)
@@ -307,17 +360,18 @@ async function init () {
 
     const gameObj = gameList[gameName]
 
-    const saveDir = gameObj.saves?.replace(/^~\//, `${HOME_DIR}/`)
-
-    if (saveDir && argv.linkSaves) await processGameSave(gameName, path.resolve(saveDir))
+    if (commands.includes('link-saves')) {
+      const saveDir = gameObj.saves?.replace(/^~\//, `${HOME_DIR}/`)
+      if (saveDir) await processGameSave(gameName, path.resolve(saveDir), argv.savesDir)
+    }
 
     if (gameObj.exe) {
-      if (argv.gameShortcuts) {
-        await processGameShortcut(gameName, gameObj.exe, gameObj.args, saveDir)
+      if (commands.includes('game-shortcuts')) {
+        await processGameShortcut(gameName, gameObj.exe, gameObj.args, argv.gamesDir, argv.shortcutsDir)
       }
 
-      if (argv.steamShortcuts) {
-        const steamGameObj = await processSteamShortcut(gameName, gameObj.exe, gameObj.args)
+      if (commands.includes('steam-shortcuts')) {
+        const steamGameObj = await processSteamShortcut(gameName, gameObj.exe, gameObj.args, argv.gamesDir)
         if (steamGameObj) {
           steamShortcuts.push(steamGameObj)
         }
@@ -325,54 +379,8 @@ async function init () {
     }
   }
 
-  if (argv.steamShortcuts && !DRY_RUN) {
-    const oldShortcutsVdf = await decodeSteamShortcut(steamShortcutsFile)
-
-    const oldShortcuts = {}
-    const allShortcuts = []
-
-    for (const steamShortcut of Object.values(oldShortcutsVdf.shortcuts)) {
-      const isSGLGame = Object.values(steamShortcut.tags).includes('sgl')
-      if (!isSGLGame) allShortcuts.push(steamShortcut)
-      else oldShortcuts[steamShortcut.appid] = steamShortcut
-    }
-
-    for (const steamShortcut of steamShortcuts) {
-      const oldShortcut = oldShortcuts[steamShortcut.appid]
-      if (oldShortcut) {
-        oldShortcut.Exe = steamShortcut.Exe
-        oldShortcut.StartDir = steamShortcut.StartDir
-        oldShortcut.LaunchOptions = steamShortcut.LaunchOptions
-        allShortcuts.push(oldShortcut)
-      } else {
-        allShortcuts.push(steamShortcut)
-      }
-    }
-
-    const cats = new SteamCat(steamLevelDB, argv.steamUserId)
-    await cats.read()
-
-    let sglCollection = cats.get('save-game-linker')
-
-    if (!sglCollection) {
-      sglCollection = cats.add('save-game-linker', {
-        name: argv.steamCollection
-      })
-    }
-
-    sglCollection.value.added = []
-
-    const newShortcutsObj = { shortcuts: {} }
-
-    let steamObjIdx = 0
-    for (const steamShortcut of allShortcuts) {
-      newShortcutsObj.shortcuts[steamObjIdx++] = steamShortcut
-      sglCollection.value.added.push(steamShortcut.appid)
-    }
-
-    await encodeSteamShortcut(steamShortcutsFile, newShortcutsObj)
-    await cats.save()
-    await cats.close()
+  if (commands.includes('steam-shortcuts')) {
+    await writeSteamShortcuts(argv.steamUserId, steamShortcuts, steamShortcutsFile, steamLevelDB, argv.steamCollection)
   }
 }
 
