@@ -11,13 +11,13 @@ import yargs from 'yargs/yargs'
 import createDesktopShortcut from 'create-desktop-shortcuts'
 import { readVdf, writeVdf } from 'steam-binary-vdf'
 import SteamCat from 'steam-categories'
-import crc32 from 'buffer-crc32'
+import { crc32 } from 'node:zlib'
 
 let HOME_DIR
 let DRY_RUN
 
 function genSteamAppId (exePath) {
-  const crc = crc32.unsigned(exePath + '\0') // Append null byte
+  const crc = crc32(exePath + '\0') // Append null byte
   return (crc | 0x80000000) >>> 0 // Set highest bit
 }
 
@@ -136,7 +136,7 @@ async function processSteamShortcut (gameName, gameExe, gameArgs, gamesDir) {
       tags: { 0: 'sgl' }
     }
 
-    console.log(`  Steam Local AppId: ${chalk.blue(steamShortcut.appid)}`)
+    console.log(`  Local Steam AppId: ${chalk.blue(steamShortcut.appid)}`)
 
     return steamShortcut
   } else {
@@ -356,9 +356,15 @@ async function init () {
   const steamShortcuts = []
 
   for (const gameName in gameList) {
+    let gameObj = gameList[gameName]
+
+    if (!gameObj) continue
+
     console.log(`\n${chalk.magenta(gameName)}`)
 
-    const gameObj = gameList[gameName]
+    if (typeof gameObj === 'string') {
+      gameObj = { saves: gameObj }
+    }
 
     if (commands.includes('link-saves')) {
       const saveDir = gameObj.saves?.replace(/^~\//, `${HOME_DIR}/`)
