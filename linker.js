@@ -12,6 +12,8 @@ import GameSaves from './lib/game-saves.js'
 import SteamShortcuts from './lib/steam-shortcuts.js'
 import GameShortcuts from './lib/game-shortcuts.js'
 
+import findSteamAppId from './lib/steam-appid.js'
+
 function nicePath (p, color = 'grey') {
   return chalk[color](p.replace(os.homedir(), '~'))
 }
@@ -180,8 +182,10 @@ async function init () {
     console.log(chalk.green('Dry Run Mode\n'))
   }
 
-  console.log('Home Directory      : ', chalk.blue(homeDir))
-  console.log('Paths File          : ', chalk.blue(pathsFile))
+  if (commands.includes('game-shortcuts') || commands.includes('steam-shortcuts') || commands.includes('link-saves')) {
+    console.log('Home Directory      : ', chalk.blue(homeDir))
+    console.log('Paths File          : ', chalk.blue(pathsFile))
+  }
   if (commands.includes('link-saves')) {
     console.log('Saves Directory     : ', chalk.blue(argv.savesDir))
   }
@@ -204,11 +208,27 @@ async function init () {
   //   sgdb = new SGDB(configuration.steamgriddb_api_key)
   // }
 
-  const cacheDir = path.join(homeDir, 'game-linker', 'cache')
-  const iconDir = path.join(homeDir, 'game-linker', 'icons')
+  argv.cacheDir = path.join(homeDir, 'game-linker', 'cache')
+  argv.iconDir = path.join(homeDir, 'game-linker', 'icons')
 
-  await fse.ensureDir(iconDir)
-  await fse.ensureDir(cacheDir)
+  await fse.ensureDir(argv.iconDir)
+  await fse.ensureDir(argv.cacheDir)
+
+  if (commands.includes('find-steam-appid')) {
+    if (argv.name == null) {
+      console.log(chalk.red('Provide --name'))
+      return
+    }
+    console.log(chalk.yellow(`Searching for ${argv.name}\n`))
+
+    const steamItem = await findSteamAppId(argv.name, argv)
+    if (steamItem) {
+      console.log(`Found ${chalk.magenta(steamItem.name)}, Steam AppId ${chalk.yellow(steamItem.appid)}`)
+    } else {
+      console.log(`${chalk.red(`${argv.name} not found`)}`)
+    }
+    return
+  }
 
   if (commands.includes('link-saves')) {
     console.log(chalk.yellow('\nProcessing Game Saves\n'))
