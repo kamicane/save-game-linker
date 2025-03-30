@@ -8,7 +8,9 @@ import chalk from 'chalk'
 import yaml from 'yaml'
 import yargs from 'yargs/yargs'
 
-export function nicePath (p, color = 'blue') {
+import GameSaves from './lib/game-saves.js'
+
+export function nicePath (p, color = 'grey') {
   return chalk[color](p.replace(os.homedir(), '~'))
 }
 
@@ -125,11 +127,11 @@ async function init () {
     describe: `Paths YAML file to use ${chalk.grey('(all commands)')}`
   })
 
-  // parser.option('dry-run', {
-  //   default: false,
-  //   type: 'boolean',
-  //   describe: `Do not make any file system modifications ${chalk.grey('(all commands)')}`
-  // })
+  parser.option('dry-run', {
+    default: false,
+    type: 'boolean',
+    describe: `Do not make any file system modifications ${chalk.grey('(all commands)')}`
+  })
 
   parser.option('saves-dir', {
     default: savesDirDefault,
@@ -176,7 +178,7 @@ async function init () {
     .alias('h', 'help')
     .alias('v', 'version')
 
-  parser.epilogue(`https://github.com/kamicane/${CONFIG.APP_NAME}`)
+  parser.epilogue(`https://github.com/kamicane/${appName}`)
 
   const argv = parser.parse()
   const commands = argv._
@@ -190,9 +192,9 @@ async function init () {
     argv.steamLevelDB = path.join(homeDir, 'AppData/Local/Steam/htmlcache/Local Storage/leveldb')
   }
 
-  // if (argv.dryRun) {
-  //   console.log(chalk.green('Dry Run Mode\n'))
-  // }
+  if (argv.dryRun) {
+    console.log(chalk.green('Dry Run Mode\n'))
+  }
 
   console.log('Home Directory      : ', chalk.blue(homeDir))
   console.log('Paths File          : ', chalk.blue(pathsFile))
@@ -223,6 +225,41 @@ async function init () {
 
   await fse.ensureDir(iconDir)
   await fse.ensureDir(cacheDir)
+
+  if (commands.includes('link-saves')) {
+    const gameSaveProcessor = new GameSaves(argv)
+
+    gameSaveProcessor.on('game-start', (gameName) => {
+      console.log(chalk.blue(gameName))
+    })
+
+    gameSaveProcessor.on('game-error', (gameName, err) => {
+      console.log(`  ${chalk.red(err.message)} ${err.stack}`)
+    })
+
+    gameSaveProcessor.on('game-info', (gameName, infoObj) => {
+      switch (infoObj.type) {
+        case 'delete': {
+          console.log(`  ${chalk.red('Deleted')} ${nicePath(infoObj.item)} (${infoObj.reason})`)
+          break
+        }
+        case 'move': {
+          console.log(`  ${chalk.magenta('Moved')} ${nicePath(infoObj.from)} to ${nicePath(infoObj.to)}`)
+          break
+        }
+        case 'link': {
+          console.log(`  ${chalk.green('Linked')} ${nicePath(infoObj.from)} to ${nicePath(infoObj.to)}`)
+          break
+        }
+        case 'noop': {
+          console.log(`  No Operation (${infoObj.reason})`)
+          break
+        }
+      }
+    })
+
+    await gameSaveProcessor.process(gameList)
+  }
 
   // for (const gameName in gameList) {
   //   let gameObj = gameList[gameName]
