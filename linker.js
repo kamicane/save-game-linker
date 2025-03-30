@@ -9,72 +9,56 @@ import yaml from 'yaml'
 import yargs from 'yargs/yargs'
 
 import GameSaves from './lib/game-saves.js'
+import SteamShortcuts from './lib/steam-shortcuts.js'
+import GameShortcuts from './lib/game-shortcuts.js'
 
-export function nicePath (p, color = 'grey') {
+function nicePath (p, color = 'grey') {
   return chalk[color](p.replace(os.homedir(), '~'))
 }
 
-// import SGDB from 'steamgriddb'
+function attachEvents (processor) {
+  processor.on('error', (err) => {
+    console.log(`${chalk.red(err.message)} ${err.stack}`)
+  })
 
-// import { CONFIG } from './lib/util.js'
-// import { processGameShortcut } from './lib/game-shortcuts.js'
-// import { processSteamShortcut, writeSteamShortcuts } from './lib/steam-shortcuts.js'
+  processor.on('info', (info) => {
+    console.log(`${chalk.green(info.message)}`)
+  })
 
-// async function linkSave (srcPath, dstPath) {
-//   if (!CONFIG.DRY_RUN) {
-//     await fse.mkdirp(path.dirname(dstPath))
-//     await fse.symlink(srcPath, dstPath, process.platform === 'win32' ? 'junction' : 'dir')
-//   }
-//   console.log(`  linked ${nicePath(dstPath, 'yellow')} to ${nicePath(srcPath, 'blue')}`)
-// }
+  processor.on('game-start', (gameName) => {
+    console.log(chalk.blue(gameName))
+  })
 
-// async function processGameSave (gameName, saveDir, savesDir) {
-//   const srcDir = path.join(savesDir, gameName)
+  processor.on('game-error', (gameName, err) => {
+    console.log(`  ${chalk.red(err.message)} ${err.stack}`)
+  })
 
-//   let srcStat
-//   try {
-//     srcStat = await fse.stat(srcDir)
-//   } catch (err) { }
-
-//   const srcReal = srcStat ? await fse.realpath(srcDir) : null
-
-//   let dstStat
-//   try {
-//     dstStat = await fse.stat(saveDir)
-//   } catch (err) { }
-
-//   const dstReal = dstStat ? await fse.realpath(saveDir) : null
-
-//   // scenarios
-//   // 1: source directory exists, destination does not exist = link
-//   // 2: source directory exists, destination exists, not already linked = delete destination and link
-//   // 2: source directory exists, destination exists, already linked = log
-//   // 2: source directory does not exist, destination exists and is directory = move destination to source and link
-//   // 2: source directory does not exist, destination exists and is not directory = warn
-//   // 2: source directory does not exist, destination does not exist = do nothing, no warn
-
-//   if (srcStat && srcStat.isDirectory()) {
-//     if (dstReal === srcReal) {
-//       console.log(`  ${nicePath(saveDir, 'yellow')} is already linked to ${nicePath(srcDir, 'blue')}`)
-//     } else {
-//       try {
-//         const lstat = await fse.lstat(saveDir)
-//         if (lstat && !CONFIG.DRY_RUN) await fse.rm(saveDir, { recursive: true, force: true })
-//         if (lstat) console.log(`  ${nicePath(saveDir, 'red')} was deleted`)
-//       } catch (err) { }
-//       await linkSave(srcDir, saveDir)
-//     }
-//   } else if (dstStat && dstStat.isDirectory()) {
-//     try {
-//       const lstat = await fse.lstat(srcDir)
-//       if (lstat && !CONFIG.DRY_RUN) await fse.rm(srcDir, { recursive: true, force: true })
-//       if (lstat) console.log(`  ${nicePath(srcDir, 'red')} was deleted`)
-//     } catch (err) { }
-//     if (!CONFIG.DRY_RUN) await fse.rename(saveDir, srcDir)
-//     console.log(`  moved ${nicePath(saveDir, 'blue')} to ${nicePath(savesDir, 'blue')}`)
-//     await linkSave(srcDir, saveDir)
-//   }
-// }
+  processor.on('game-info', (gameName, infoObj) => {
+    switch (infoObj.type) {
+      case 'delete': {
+        console.log(`  ${chalk.red('Deleted')} ${nicePath(infoObj.item)} (${infoObj.reason})`)
+        break
+      }
+      case 'move': {
+        console.log(`  ${chalk.magenta('Moved')} ${nicePath(infoObj.from)} to ${nicePath(infoObj.to)}`)
+        break
+      }
+      case 'link': {
+        console.log(`  ${chalk.green('Linked')} ${nicePath(infoObj.from)} to ${nicePath(infoObj.to)}`)
+        break
+      }
+      case 'create': {
+        console.log(`  ${chalk.green('Created')} ${infoObj.item}`)
+        break
+      }
+      case 'noop': {
+        if (infoObj.item != null) console.log(`  No Operation for ${infoObj.item} (${infoObj.reason})`)
+        else console.log(`  No Operation (${infoObj.reason})`)
+        break
+      }
+    }
+  })
+}
 
 async function init () {
   const appName = 'game-linker'
@@ -227,73 +211,34 @@ async function init () {
   await fse.ensureDir(cacheDir)
 
   if (commands.includes('link-saves')) {
+    console.log(chalk.yellow('\nProcessing Game Saves\n'))
+
     const gameSaveProcessor = new GameSaves(argv)
 
-    gameSaveProcessor.on('game-start', (gameName) => {
-      console.log(chalk.blue(gameName))
-    })
-
-    gameSaveProcessor.on('game-error', (gameName, err) => {
-      console.log(`  ${chalk.red(err.message)} ${err.stack}`)
-    })
-
-    gameSaveProcessor.on('game-info', (gameName, infoObj) => {
-      switch (infoObj.type) {
-        case 'delete': {
-          console.log(`  ${chalk.red('Deleted')} ${nicePath(infoObj.item)} (${infoObj.reason})`)
-          break
-        }
-        case 'move': {
-          console.log(`  ${chalk.magenta('Moved')} ${nicePath(infoObj.from)} to ${nicePath(infoObj.to)}`)
-          break
-        }
-        case 'link': {
-          console.log(`  ${chalk.green('Linked')} ${nicePath(infoObj.from)} to ${nicePath(infoObj.to)}`)
-          break
-        }
-        case 'noop': {
-          console.log(`  No Operation (${infoObj.reason})`)
-          break
-        }
-      }
-    })
+    attachEvents(gameSaveProcessor)
 
     await gameSaveProcessor.process(gameList)
   }
 
-  // for (const gameName in gameList) {
-  //   let gameObj = gameList[gameName]
+  if (commands.includes('steam-shortcuts')) {
+    console.log(chalk.yellow('\nProcessing Steam Shortcuts\n'))
 
-  //   if (!gameObj) continue
+    const steamShortcutsProcessor = new SteamShortcuts(argv)
 
-  //   console.log(`\n${chalk.magenta(gameName)}`)
+    attachEvents(steamShortcutsProcessor)
 
-  //   if (typeof gameObj === 'string') {
-  //     gameObj = { saves: gameObj }
-  //   }
+    await steamShortcutsProcessor.process(gameList)
+  }
 
-  //   if (commands.includes('link-saves')) {
-  //     const saveDir = gameObj.saves?.replace(/^~\//, `${homeDir}/`)
-  //     if (saveDir) await processGameSave(gameName, path.resolve(saveDir), argv.savesDir)
-  //   }
+  if (commands.includes('game-shortcuts')) {
+    console.log(chalk.yellow('\nProcessing Game Shortcuts\n'))
 
-  //   if (gameObj.exe) {
-  //     if (commands.includes('game-shortcuts')) {
-  //       await processGameShortcut(gameName, gameObj.exe, gameObj.args, argv.gamesDir, argv.shortcutsDir)
-  //     }
+    const gameShortcutsProcessor = new GameShortcuts(argv)
 
-  //     if (commands.includes('steam-shortcuts')) {
-  //       const steamGameObj = await processSteamShortcut(gameName, gameObj.exe, gameObj.args, argv.gamesDir)
-  //       if (steamGameObj) {
-  //         steamShortcuts.push(steamGameObj)
-  //       }
-  //     }
-  //   }
-  // }
+    attachEvents(gameShortcutsProcessor)
 
-  // if (commands.includes('steam-shortcuts')) {
-  //   await writeSteamShortcuts(argv.steamUserId, steamShortcuts, steamShortcutsFile, steamLevelDB, argv.steamCollection)
-  // }
+    await gameShortcutsProcessor.process(gameList)
+  }
 }
 
 init()
