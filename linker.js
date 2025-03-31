@@ -241,8 +241,16 @@ async function init () {
     const newSaveDir = path.join(argv.savesDir, argv.newName)
     const oldSaveDir = path.join(argv.savesDir, argv.name)
 
+    const oldIconPath = path.join(argv.iconDir, `${argv.name}.ico`)
+    const newIconPath = path.join(argv.iconDir, `${argv.newName}.ico`)
+
     if (await fse.exists(newGameDir)) {
       console.log(`Game directory ${argv.newName} already exists`)
+      return
+    }
+
+    if (await fse.exists(newIconPath)) {
+      console.log(`Icon ${argv.newName} already exists`)
       return
     }
 
@@ -254,6 +262,11 @@ async function init () {
     if (await fse.exists(oldGameDir)) {
       await fse.rename(oldGameDir, newGameDir)
       console.log(`renamed ${nicePath(oldGameDir)} to ${nicePath(newGameDir)}`)
+    }
+
+    if (await fse.exists(oldIconPath)) {
+      await fse.rename(oldIconPath, newIconPath)
+      console.log(`renamed ${nicePath(oldIconPath)} to ${nicePath(newIconPath)}`)
     }
 
     if (await fse.exists(oldSaveDir)) {
