@@ -58,6 +58,9 @@ function attachEvents (processor) {
         else console.log(`  No Operation (${infoObj.reason})`)
         break
       }
+      default: {
+        console.log(`  ${infoObj.message}`)
+      }
     }
   })
 }
@@ -209,16 +212,70 @@ async function init () {
   // }
 
   argv.cacheDir = path.join(homeDir, 'game-linker', 'cache')
+  argv.iconCacheDir = path.join(argv.cacheDir, 'icons')
   argv.iconDir = path.join(homeDir, 'game-linker', 'icons')
 
   await fse.ensureDir(argv.iconDir)
   await fse.ensureDir(argv.cacheDir)
+  await fse.ensureDir(argv.iconCacheDir)
+
+  if (commands.includes('rename-game')) {
+    if (argv.name == null || argv.newName == null) {
+      console.log(chalk.red('Provide --name, --new-name'))
+      return
+    }
+
+    const gameObj = gameList[argv.name]
+    if (gameObj == null) {
+      console.log(`Game ${argv.name} not found in list`)
+      return
+    }
+
+    if (gameList[argv.newName]) {
+      console.log(`Game ${argv.newName} already exists`)
+      return
+    }
+
+    const newGameDir = path.join(argv.gamesDir, argv.newName)
+    const oldGameDir = path.join(argv.gamesDir, argv.name)
+    const newSaveDir = path.join(argv.savesDir, argv.newName)
+    const oldSaveDir = path.join(argv.savesDir, argv.name)
+
+    if (await fse.exists(newGameDir)) {
+      console.log(`Game directory ${argv.newName} already exists`)
+      return
+    }
+
+    if (await fse.exists(newSaveDir)) {
+      console.log(`Save directory ${argv.newName} already exists`)
+      return
+    }
+
+    if (await fse.exists(oldGameDir)) {
+      await fse.rename(oldGameDir, newGameDir)
+      console.log(`renamed ${nicePath(oldGameDir)} to ${nicePath(newGameDir)}`)
+    }
+
+    if (await fse.exists(oldSaveDir)) {
+      await fse.rename(oldSaveDir, newSaveDir)
+      console.log(`renamed ${nicePath(oldSaveDir)} to ${nicePath(newSaveDir)}`)
+    }
+
+    delete gameList[argv.name]
+    gameList[argv.newName] = gameObj
+
+    const newGameListStr = yaml.stringify(gameList)
+    await fse.writeFile(argv.pathsFile, newGameListStr, 'utf-8')
+
+    return
+  }
 
   if (commands.includes('find-steam-appid')) {
     if (argv.name == null) {
       console.log(chalk.red('Provide --name'))
       return
     }
+
     console.log(chalk.yellow(`Searching for ${argv.name}\n`))
 
     const steamItem = await findSteamAppId(argv.name, argv)
@@ -233,31 +290,31 @@ async function init () {
   if (commands.includes('link-saves')) {
     console.log(chalk.yellow('\nProcessing Game Saves\n'))
 
-    const gameSaveProcessor = new GameSaves(argv)
+    const gameSaveProcessor = new GameSaves()
 
     attachEvents(gameSaveProcessor)
 
-    await gameSaveProcessor.process(gameList)
+    await gameSaveProcessor.process(gameList, argv)
   }
 
   if (commands.includes('steam-shortcuts')) {
     console.log(chalk.yellow('\nProcessing Steam Shortcuts\n'))
 
-    const steamShortcutsProcessor = new SteamShortcuts(argv)
+    const steamShortcutsProcessor = new SteamShortcuts()
 
     attachEvents(steamShortcutsProcessor)
 
-    await steamShortcutsProcessor.process(gameList)
+    await steamShortcutsProcessor.process(gameList, argv)
   }
 
   if (commands.includes('game-shortcuts')) {
     console.log(chalk.yellow('\nProcessing Game Shortcuts\n'))
 
-    const gameShortcutsProcessor = new GameShortcuts(argv)
+    const gameShortcutsProcessor = new GameShortcuts()
 
     attachEvents(gameShortcutsProcessor)
 
-    await gameShortcutsProcessor.process(gameList)
+    await gameShortcutsProcessor.process(gameList, argv)
   }
 }
 

@@ -12,13 +12,16 @@
   "bugs": "https://github.com/kamicane/save-game-linker/issues",
   "license": "MIT",
   "dependencies": {
-    "buffer-crc32": "^1.0.0",
+    "axios": "^1.8.4",
     "chalk": "^5.4.1",
     "create-desktop-shortcuts": "^1.11.0",
     "fs-extra": "^11.3.0",
+    "fuse.js": "^7.1.0",
     "glob": "^11.0.1",
+    "icojs": "^0.19.5",
     "steam-binary-vdf": "^0.1.0",
     "steam-categories": "^1.1.4",
+    "steamgriddb": "^2.2.0",
     "yaml": "^2.7.0",
     "yargs": "^17.7.2"
   },
