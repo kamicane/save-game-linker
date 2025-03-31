@@ -38,7 +38,7 @@ function attachEvents (processor) {
   processor.on('game-info', (gameName, infoObj) => {
     switch (infoObj.type) {
       case 'delete': {
-        console.log(`  ${chalk.red('Deleted')} ${nicePath(infoObj.item)} (${infoObj.reason})`)
+        console.log(`  ${chalk.red('Deleted')} ${nicePath(infoObj.item)} (${infoObj.message})`)
         break
       }
       case 'move': {
@@ -54,8 +54,8 @@ function attachEvents (processor) {
         break
       }
       case 'noop': {
-        if (infoObj.item != null) console.log(`  No Operation for ${infoObj.item} (${infoObj.reason})`)
-        else console.log(`  No Operation (${infoObj.reason})`)
+        if (infoObj.item != null) console.log(`  No Operation for ${infoObj.item} (${infoObj.message})`)
+        else console.log(`  No Operation (${infoObj.message})`)
         break
       }
       default: {
